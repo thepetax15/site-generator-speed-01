@@ -1,4 +1,4 @@
-# site-generator-speed-01 — a faster makefun-site
+# site-generator-speed-01 v2 — a faster makefun-site
 
 [![make.fun](https://make.fun/badge/site-generator-speed-01-run-20261122.svg)](https://make.fun/bounty/site-generator-speed-01-run-20261122)
 [![rank](https://make.fun/badge/site-generator-speed-01-run-20261122/thepetax15/site-generator-speed-01/rank.svg)](https://make.fun/bounty/site-generator-speed-01-run-20261122)
@@ -6,7 +6,9 @@
 
 An original, dependency-free reimplementation of makefun-site 1.0.0 that
 returns byte-for-byte the same output tree for every site, several times
-faster. Built for make.fun's "Build a static site faster" bounty.
+faster. Built for make.fun's "Build a static site faster" bounty. This is
+the second iteration: the Markdown renderer and the template engine were
+rebuilt around profiling of the first version.
 
 ## Layout
 
@@ -17,36 +19,31 @@ faster. Built for make.fun's "Build a static site faster" bounty.
 
 ## How it is faster
 
-- **Inline Markdown** scans for the next special character with one
-  regex instead of walking (and escaping) one character at a time; plain
-  runs are copied whole. Strong/emphasis closers are found with
-  `indexOf` plus a backslash-parity check instead of a forward scan.
-- **Block Markdown** renders in a single pass over the body's lines,
-  with no token objects, and counts the body's words on the same pass.
-- **Front matter** is parsed over the same line array the renderer uses,
-  so a body is never joined and re-split.
-- **Templates** compile once per case into flat op lists and render into
-  one flat scope object (loop bindings saved and restored), with string
-  pieces joined once per render. Templates that read only the
-  case-level values (`site`, `tags`, `recent`) — typically the shared
-  header, navigation and footer — are rendered once per (name, depth)
-  and the string reused: a static analysis threads the loop-bound names
-  through includes to prove a fragment's output depends only on those
-  three objects, and an identity check at each include site guards
-  against a loop in the caller shadowing them.
-- **Block dispatch** looks at each line's first character before running
-  any test: every block kind is anchored there, so a plain paragraph
-  line costs one character check instead of six helper calls.
-- **Word counting** is batched per block, not per line: a paragraph's,
-  list item's or fence body's words are counted once on the string that
-  is joined for rendering anyway (a list item's marker adds one word).
+- **Markdown renders straight over the source string.** Nothing is ever
+  split into lines: block boundaries come from an `indexOf('\n')` scan,
+  block kinds are dispatched on the line's first character, and paragraph
+  and code bodies are single span slices. Each body's words are counted
+  in one pass over the body string.
+- **Inline Markdown works on ranges**, so strong, emphasis and link text
+  recurse without slicing, and one module-level regex serves every call
+  (its `lastIndex` is set explicitly before every exec, so recursion
+  cannot disturb the outer scan). Links resolve through one shared
+  function and a context object, never a closure per source, so the call
+  site stays monomorphic.
+- **Templates compile once per case into flat op lists** and render into
+  one flat scope object, with string pieces joined once per render. A
+  `for` loop only builds its loop-info object when a static analysis
+  proves its body can read it. Templates that read only the case-level
+  values (`site`, `tags`, `recent`) render once per (name, depth); a
+  template rendered inside a loop that reads one loop variable on top of
+  those renders once per (name, depth, variable identity) — a post's
+  card is the same string on its index page and on every tag page, so it
+  renders once. Page, tag and pager scope objects are filled in place
+  and reused across renders.
 - **Slugs and long dates** are memoised: titles and tag names repeat
   across a site far more often than they vary. Pure-ASCII slugs take a
   regex fast path; anything else goes through NFKD normalisation.
   Link-path resolution is memoised too.
-- **String building** collects pieces in arrays and joins once for every
-  rendered page and block; inline rendering concatenates (ropes beat
-  array+join there, measured).
 
 ## Behaviour
 
